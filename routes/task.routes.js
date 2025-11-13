@@ -8,7 +8,7 @@ const { validate } = require('../middlewares/validate');
 const { uploadTask } = require('../config/cloudinary');
 const { ROLES } = require('../config/constants');
 
-// Validation
+// Validation Rules
 const taskValidation = [
   body('projectId').notEmpty().withMessage('Project ID is required'),
   body('title').trim().notEmpty().withMessage('Title is required'),
@@ -37,6 +37,14 @@ const reassignValidation = [
   validate
 ];
 
+// ✅ Hold validation - FIXED POSITION
+const holdValidation = [
+  body('reason').optional().trim(),
+  validate
+];
+
+// Routes
+
 // NEW ROUTES - My Tasks (for member, projectlead, teamlead)
 router.get('/my-tasks', protect, taskController.getMyTasks);
 router.get('/assigned-by-me', protect, taskController.getAssignedTasks);
@@ -51,6 +59,10 @@ router.put('/:id', protect, taskController.updateTask);
 router.post('/:id/start', protect, taskController.startTask);
 router.post('/:id/complete', protect, taskController.completeTask);
 router.post('/:id/reassign', protect, reassignValidation, taskController.reassignTask);
+
+// ✅ NEW - Hold & Resume routes
+router.post('/:id/hold', protect, holdValidation, taskController.holdTask);
+router.post('/:id/resume', protect, taskController.resumeTask);
 
 // Task updates
 router.post('/:id/updates', protect, uploadTask.array('attachments', 3), updateValidation, taskController.addTaskUpdate);

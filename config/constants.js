@@ -33,6 +33,7 @@ module.exports = {
   TASK_STATUS: {
     NOT_STARTED: 'not-started',
     IN_PROGRESS: 'in-progress',
+    ON_HOLD: 'on-hold', 
     COMPLETED: 'completed',
     CANCELLED: 'cancelled',
     BACK_TO_PROJECTLEAD: 'back_to_projectlead'
@@ -77,7 +78,9 @@ module.exports = {
     ISSUE: 'issue',
     COMMENT: 'comment',
     FILE: 'file',
-    COMPLETION: 'completion'
+    COMPLETION: 'completion',
+    HOLD: 'hold',          // ✅ NEW - Task hold update
+    RESUME: 'resume'
   
   
   },

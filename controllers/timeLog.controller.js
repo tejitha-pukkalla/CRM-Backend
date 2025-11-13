@@ -116,8 +116,25 @@ exports.stopTimer = async (req, res, next) => {
       return error(res, 'No running timer found', 404);
     }
 
+    // If timer is paused, resume it first to finalize pause duration
+    if (runningTimer.isPaused) {
+      const pauseDuration = Math.floor((new Date() - runningTimer.pausedAt) / 60000);
+      runningTimer.pauseHistory.push({
+        pausedAt: runningTimer.pausedAt,
+        resumedAt: new Date(),
+        reason: runningTimer.pauseReason,
+        duration: pauseDuration
+      });
+      runningTimer.pauseDuration += pauseDuration;
+    }
+
     runningTimer.endTime = new Date();
-    runningTimer.duration = Math.floor((runningTimer.endTime - runningTimer.startTime) / 60000); // minutes
+    
+    // ✅ CALCULATE DURATION EXCLUDING PAUSE TIME
+    const totalDuration = Math.floor((runningTimer.endTime - runningTimer.startTime) / 60000);
+    runningTimer.duration = Math.max(0, totalDuration - runningTimer.pauseDuration);
+    
+    runningTimer.isPaused = false;
     await runningTimer.save();
 
     // Update task actual time
@@ -186,6 +203,76 @@ exports.addManualTime = async (req, res, next) => {
     return success(res, { timeLog }, 'Manual time entry added', 201);
   } catch (err) {
     console.error('Error adding manual time:', err);
+    next(err);
+  }
+};
+
+// @desc    Pause running timer
+// @route   POST /api/time/:id/pause
+// @access  Private (Member)
+exports.pauseTimer = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+
+    const runningTimer = await TaskTimeLog.findOne({
+      taskId: req.params.id,
+      userId: req.user._id,
+      endTime: null,
+      isPaused: false
+    });
+
+    if (!runningTimer) {
+      return error(res, 'No running timer found', 404);
+    }
+
+    runningTimer.isPaused = true;
+    runningTimer.pausedAt = new Date();
+    runningTimer.pauseReason = reason || null;
+    await runningTimer.save();
+
+    return success(res, { timeLog: runningTimer }, 'Timer paused');
+  } catch (err) {
+    console.error('Error pausing timer:', err);
+    next(err);
+  }
+};
+
+// @desc    Resume paused timer
+// @route   POST /api/time/:id/resume
+// @access  Private (Member)
+exports.resumeTimer = async (req, res, next) => {
+  try {
+    const pausedTimer = await TaskTimeLog.findOne({
+      taskId: req.params.id,
+      userId: req.user._id,
+      endTime: null,
+      isPaused: true
+    });
+
+    if (!pausedTimer) {
+      return error(res, 'No paused timer found', 404);
+    }
+
+    const pauseDuration = Math.floor((new Date() - pausedTimer.pausedAt) / 60000);
+    
+    // Add to pause history
+    pausedTimer.pauseHistory.push({
+      pausedAt: pausedTimer.pausedAt,
+      resumedAt: new Date(),
+      reason: pausedTimer.pauseReason,
+      duration: pauseDuration
+    });
+
+    pausedTimer.isPaused = false;
+    pausedTimer.resumedAt = new Date();
+    pausedTimer.pauseDuration += pauseDuration;
+    pausedTimer.pauseReason = null;
+    pausedTimer.pausedAt = null;
+    await pausedTimer.save();
+
+    return success(res, { timeLog: pausedTimer }, 'Timer resumed');
+  } catch (err) {
+    console.error('Error resuming timer:', err);
     next(err);
   }
 };

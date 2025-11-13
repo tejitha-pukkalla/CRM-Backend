@@ -32,7 +32,34 @@ const taskTimeLogSchema = new mongoose.Schema({
     type: String,
     enum: Object.values(TIME_ENTRY_TYPES),
     default: TIME_ENTRY_TYPES.AUTOMATIC
-  }
+  },
+  isPaused: {
+    type: Boolean,
+    default: false
+  },
+  pausedAt: {
+    type: Date,
+    default: null
+  },
+  resumedAt: {
+    type: Date,
+    default: null
+  },
+  pauseReason: {
+    type: String,
+    default: null
+  },
+  pauseDuration: {
+    type: Number, // in minutes - total pause time
+    default: 0
+  },
+  // Array to track multiple pause/resume cycles
+  pauseHistory: [{
+    pausedAt: Date,
+    resumedAt: Date,
+    reason: String,
+    duration: Number // in minutes
+  }]
 }, {
   timestamps: true
 });
@@ -40,5 +67,6 @@ const taskTimeLogSchema = new mongoose.Schema({
 taskTimeLogSchema.index({ taskId: 1 });
 taskTimeLogSchema.index({ userId: 1 });
 taskTimeLogSchema.index({ startTime: 1 });
+taskTimeLogSchema.index({ isPaused: 1 });
 
 module.exports = mongoose.model('TaskTimeLog', taskTimeLogSchema);

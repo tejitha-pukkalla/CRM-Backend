@@ -431,7 +431,7 @@ exports.completeTask = async (req, res, next) => {
       return error(res, 'You are not assigned to this task', 403);
     }
 
-    // End any running time logs
+    // ✅ FIXED: End any running time logs with proper pause handling
     const runningLog = await TaskTimeLog.findOne({
       taskId: task._id,
       userId: req.user._id,
@@ -439,14 +439,31 @@ exports.completeTask = async (req, res, next) => {
     });
 
     if (runningLog) {
+      // If timer is paused, finalize the pause first
+      if (runningLog.isPaused) {
+        const pauseDuration = Math.floor((new Date() - runningLog.pausedAt) / 60000);
+        runningLog.pauseHistory.push({
+          pausedAt: runningLog.pausedAt,
+          resumedAt: new Date(),
+          reason: runningLog.pauseReason,
+          duration: pauseDuration
+        });
+        runningLog.pauseDuration += pauseDuration;
+      }
+
       runningLog.endTime = new Date();
-      runningLog.duration = Math.floor((runningLog.endTime - runningLog.startTime) / 60000);
+      
+      // ✅ CALCULATE ACTIVE DURATION (Total Time - Pause Time)
+      const totalDuration = Math.floor((runningLog.endTime - runningLog.startTime) / 60000);
+      runningLog.duration = Math.max(0, totalDuration - (runningLog.pauseDuration || 0));
+      
+      runningLog.isPaused = false;
       await runningLog.save();
     }
 
-    // Calculate total actual time
+    // Calculate total actual time from ALL time logs
     const timeLogs = await TaskTimeLog.find({ taskId: task._id });
-    const totalTime = timeLogs.reduce((acc, log) => acc + log.duration, 0);
+    const totalTime = timeLogs.reduce((acc, log) => acc + (log.duration || 0), 0);
 
     // Update task
     task.status = TASK_STATUS.COMPLETED;
@@ -684,3 +701,174 @@ exports.getAssignedTasks = async (req, res, next) => {
 };
 
 
+// ✅ ADD THESE TWO FUNCTIONS AT THE END OF YOUR task.controller.js
+
+// @desc    Put task on hold
+// @route   POST /api/tasks/:id/hold
+// @access  Private (Member - Assigned user only)
+exports.holdTask = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    const task = await Task.findById(req.params.id);
+
+    if (!task) {
+      return error(res, 'Task not found', 404);
+    }
+
+    // Check if user is assigned to this task
+    if (task.assignedTo.toString() !== req.user._id.toString()) {
+      return error(res, 'You are not assigned to this task', 403);
+    }
+
+    // Check if task is in progress
+    if (task.status !== TASK_STATUS.IN_PROGRESS) {
+      return error(res, 'Task must be in progress to put on hold', 400);
+    }
+
+    // Check if already on hold
+    if (task.isOnHold) {
+      return error(res, 'Task is already on hold', 400);
+    }
+
+    // Find running timer and pause it
+    const runningTimer = await TaskTimeLog.findOne({
+      taskId: task._id,
+      userId: req.user._id,
+      endTime: null,
+      isPaused: false
+    });
+
+    if (runningTimer) {
+      // Pause the timer
+      runningTimer.isPaused = true;
+      runningTimer.pausedAt = new Date();
+      runningTimer.pauseReason = reason || 'Task put on hold';
+      await runningTimer.save();
+    }
+
+    // Update task status
+    task.status = TASK_STATUS.ON_HOLD;
+    task.isOnHold = true;
+    task.heldAt = new Date();
+    task.heldBy = req.user._id;
+    task.holdReason = reason || null;
+    await task.save();
+
+    // Create task update
+    await TaskUpdate.create({
+      taskId: task._id,
+      userId: req.user._id,
+      updateType: 'hold',
+      description: `Task put on hold${reason ? `: ${reason}` : ''}`
+    });
+
+    // Notify assigner
+    await Notification.create({
+      userId: task.assignedBy,
+      type: 'task_assigned',
+      title: 'Task Put On Hold',
+      message: `${req.user.name} put "${task.title}" on hold${reason ? `: ${reason}` : ''}`,
+      referenceId: task._id,
+      referenceType: 'task'
+    });
+
+    const populatedTask = await Task.findById(task._id)
+      .populate('assignedTo', 'name email')
+      .populate('assignedBy', 'name email')
+      .populate('heldBy', 'name email');
+
+    return success(res, { task: populatedTask }, 'Task put on hold successfully');
+  } catch (err) {
+    console.error('Hold task error:', err);
+    next(err);
+  }
+};
+
+// @desc    Resume task from hold
+// @route   POST /api/tasks/:id/resume
+// @access  Private (Member - Assigned user only)
+exports.resumeTask = async (req, res, next) => {
+  try {
+    const task = await Task.findById(req.params.id);
+
+    if (!task) {
+      return error(res, 'Task not found', 404);
+    }
+
+    // Check if user is assigned to this task
+    if (task.assignedTo.toString() !== req.user._id.toString()) {
+      return error(res, 'You are not assigned to this task', 403);
+    }
+
+    // Check if task is on hold
+    if (!task.isOnHold || task.status !== TASK_STATUS.ON_HOLD) {
+      return error(res, 'Task is not on hold', 400);
+    }
+
+    // Calculate hold duration
+    const holdDuration = Math.floor((new Date() - task.heldAt) / 60000); // minutes
+    
+    // Find paused timer and resume it
+    const pausedTimer = await TaskTimeLog.findOne({
+      taskId: task._id,
+      userId: req.user._id,
+      endTime: null,
+      isPaused: true
+    });
+
+    if (pausedTimer) {
+      const pauseDuration = Math.floor((new Date() - pausedTimer.pausedAt) / 60000);
+      
+      // Add to pause history
+      pausedTimer.pauseHistory.push({
+        pausedAt: pausedTimer.pausedAt,
+        resumedAt: new Date(),
+        reason: pausedTimer.pauseReason,
+        duration: pauseDuration
+      });
+
+      // Update timer
+      pausedTimer.isPaused = false;
+      pausedTimer.resumedAt = new Date();
+      pausedTimer.pauseDuration += pauseDuration;
+      pausedTimer.pauseReason = null;
+      pausedTimer.pausedAt = null;
+      await pausedTimer.save();
+    }
+
+    // Update task
+    task.status = TASK_STATUS.IN_PROGRESS;
+    task.isOnHold = false;
+    task.resumedAt = new Date();
+    task.totalHoldTime += holdDuration;
+    await task.save();
+
+    // Create task update
+    await TaskUpdate.create({
+      taskId: task._id,
+      userId: req.user._id,
+      updateType: 'resume',
+      description: `Task resumed after ${Math.round(holdDuration / 60)}h ${holdDuration % 60}m hold`
+    });
+
+    // Notify assigner
+    await Notification.create({
+      userId: task.assignedBy,
+      type: 'task_assigned',
+      title: 'Task Resumed',
+      message: `${req.user.name} resumed work on "${task.title}"`,
+      referenceId: task._id,
+      referenceType: 'task'
+    });
+
+    const populatedTask = await Task.findById(task._id)
+      .populate('assignedTo', 'name email')
+      .populate('assignedBy', 'name email')
+      .populate('heldBy', 'name email');
+
+    return success(res, { task: populatedTask }, 'Task resumed successfully');
+  } catch (err) {
+    console.error('Resume task error:', err);
+    next(err);
+  }
+};

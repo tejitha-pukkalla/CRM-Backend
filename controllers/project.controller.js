@@ -348,9 +348,72 @@ exports.getProjectMembers = async (req, res) => {
 
 
 // ADD THIS NEW FUNCTION - Get members who can be assigned tasks (all roles)
+// exports.getAssignableMembers = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // Check if project exists
+//     const project = await Project.findById(id);
+//     if (!project) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Project not found',
+//         timestamp: new Date().toISOString()
+//       });
+//     }
+
+//     // Fetch ALL active members including member, projectlead, teamlead
+//     const members = await ProjectMember.find({ 
+//       projectId: id,
+//       isActive: true 
+//     })
+//     .populate({
+//       path: 'userId',
+//       select: 'name email department profilePic globalRole isActive',
+//       match: { isActive: true } // Only active users
+//     })
+//     .populate('assignedBy', 'name email');
+
+//     // Filter out null userId (deleted/inactive users)
+//     const assignableMembers = members
+//       .filter(member => member.userId)
+//       .map(member => ({
+//         _id: member._id,
+//         userId: member.userId._id,
+//         name: member.userId.name,
+//         email: member.userId.email,
+//         department: member.userId.department,
+//         profilePic: member.userId.profilePic,
+//         globalRole: member.userId.globalRole,
+//         roleInProject: member.roleInProject, // member, projectlead, or teamlead
+//         assignedBy: member.assignedBy,
+//         joinedAt: member.joinedAt
+//       }));
+
+//     res.status(200).json({
+//       success: true,
+//       data: assignableMembers,
+//       count: assignableMembers.length,
+//       message: 'All assignable project members retrieved successfully',
+//       timestamp: new Date().toISOString()
+//     });
+//   } catch (error) {
+//     console.error('Error fetching assignable members:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch assignable members',
+//       error: error.message,
+//       timestamp: new Date().toISOString()
+//     });
+//   }
+// };
+
+
+// ✅ UPDATED - Get members who can be assigned tasks (filtered by creator's role)
 exports.getAssignableMembers = async (req, res) => {
   try {
     const { id } = req.params;
+    const currentUser = req.user; // The person creating the task
 
     // Check if project exists
     const project = await Project.findById(id);
@@ -362,7 +425,7 @@ exports.getAssignableMembers = async (req, res) => {
       });
     }
 
-    // Fetch ALL active members including member, projectlead, teamlead
+    // Fetch ALL active members
     const members = await ProjectMember.find({ 
       projectId: id,
       isActive: true 
@@ -370,12 +433,12 @@ exports.getAssignableMembers = async (req, res) => {
     .populate({
       path: 'userId',
       select: 'name email department profilePic globalRole isActive',
-      match: { isActive: true } // Only active users
+      match: { isActive: true }
     })
     .populate('assignedBy', 'name email');
 
     // Filter out null userId (deleted/inactive users)
-    const assignableMembers = members
+    let assignableMembers = members
       .filter(member => member.userId)
       .map(member => ({
         _id: member._id,
@@ -385,16 +448,59 @@ exports.getAssignableMembers = async (req, res) => {
         department: member.userId.department,
         profilePic: member.userId.profilePic,
         globalRole: member.userId.globalRole,
-        roleInProject: member.roleInProject, // member, projectlead, or teamlead
+        roleInProject: member.roleInProject,
         assignedBy: member.assignedBy,
         joinedAt: member.joinedAt
       }));
+
+    // ✅ ROLE-BASED FILTERING
+    const currentUserRole = currentUser.globalRole;
+
+    if (currentUserRole === 'superadmin') {
+      // Superadmin can assign to: TeamLead, ProjectLead, or Member
+      // Exclude: Only Superadmin and self
+      assignableMembers = assignableMembers.filter(member => 
+        member.globalRole !== 'superadmin' &&
+        member.userId.toString() !== currentUser._id.toString()
+      );
+    } 
+    else if (currentUserRole === 'teamlead') {
+      // TeamLead can assign to: ProjectLead or Member
+      // Exclude: Superadmin, TeamLead, and self
+      assignableMembers = assignableMembers.filter(member => 
+        member.roleInProject !== 'teamlead' &&
+        member.globalRole !== 'superadmin' &&
+        member.globalRole !== 'teamlead' &&
+        member.userId.toString() !== currentUser._id.toString()
+      );
+    }
+    else {
+      // Check if current user is ProjectLead in this project
+      const currentUserProjectMember = await ProjectMember.findOne({
+        projectId: id,
+        userId: currentUser._id,
+        isActive: true
+      });
+
+      if (currentUserProjectMember && currentUserProjectMember.roleInProject === 'projectlead') {
+        // ProjectLead can assign to: Only Members
+        // Exclude: Superadmin, TeamLead, ProjectLead, and self
+        assignableMembers = assignableMembers.filter(member => 
+          member.roleInProject === 'member' &&
+          member.globalRole === 'member' &&
+          member.userId.toString() !== currentUser._id.toString()
+        );
+      } else {
+        // Regular member cannot assign tasks
+        assignableMembers = [];
+      }
+    }
 
     res.status(200).json({
       success: true,
       data: assignableMembers,
       count: assignableMembers.length,
-      message: 'All assignable project members retrieved successfully',
+      message: 'Assignable project members retrieved successfully',
       timestamp: new Date().toISOString()
     });
   } catch (error) {

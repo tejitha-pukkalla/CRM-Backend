@@ -102,6 +102,31 @@ const taskSchema = new mongoose.Schema({
   reassignmentReason: {
     type: String,
     default: null
+  },
+  isOnHold: {
+    type: Boolean,
+    default: false
+  },
+  heldAt: {
+    type: Date,
+    default: null
+  },
+  heldBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  holdReason: {
+    type: String,
+    default: null
+  },
+  resumedAt: {
+    type: Date,
+    default: null
+  },
+  totalHoldTime: {
+    type: Number, // in minutes
+    default: 0
   }
 }, {
   timestamps: true
@@ -114,5 +139,6 @@ taskSchema.index({ assignedBy: 1 });
 taskSchema.index({ approvalStatus: 1 });
 taskSchema.index({ status: 1 });
 taskSchema.index({ dueDate: 1 });
+taskSchema.index({ isOnHold: 1 });
 
 module.exports = mongoose.model('Task', taskSchema);
