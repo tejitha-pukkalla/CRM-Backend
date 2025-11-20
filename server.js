@@ -161,6 +161,7 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const timeLogRoutes = require('./routes/timeLog.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
+const ticketRoutes = require('./routes/ticket.routes'); // NEW
 
 // Health check - Root
 app.get('/', (req, res) => {
@@ -203,6 +204,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/time', timeLogRoutes);
 app.use('/api/attendance', attendanceRoutes);
 console.log('✅ Attendance routes mounted at /api/attendance');
+app.use('/api/tickets', ticketRoutes); // NEW
 
 // 404 handler - MUST BE AFTER ALL ROUTES
 app.use((req, res) => {
