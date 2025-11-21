@@ -251,7 +251,7 @@ const getTicketById = async (req, res) => {
 const updateTicketStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, remarks } = req.body;
+    const { status, remarks, adminRemarks, estimatedResolutionTime, assignedTo, internalNotes } = req.body;
 
     if (!["superadmin", "teamlead"].includes(req.user.globalRole)) {
       return res.status(403).json({
@@ -269,17 +269,25 @@ const updateTicketStatus = async (req, res) => {
       });
     }
 
-    ticket.status = status;
-    if (remarks) ticket.remarks = remarks;
+    // ✅ Update all fields that were sent
+    if (status) ticket.status = status;
+    if (remarks !== undefined) ticket.remarks = remarks;
+    if (adminRemarks !== undefined) ticket.adminRemarks = adminRemarks;
+    if (estimatedResolutionTime !== undefined) ticket.estimatedResolutionTime = estimatedResolutionTime;
+    if (assignedTo !== undefined) ticket.assignedTo = assignedTo;
+    if (internalNotes !== undefined) ticket.internalNotes = internalNotes;
+    
     ticket.updatedAt = Date.now();
 
     await ticket.save();
+    
+    // ✅ CRITICAL: Populate the response before sending
     await ticket.populate("createdBy", "name email globalRole");
 
     res.status(200).json({
       success: true,
       data: ticket,
-      message: "Ticket status updated successfully",
+      message: "Ticket updated successfully",
     });
   } catch (error) {
     console.error("Update ticket status error:", error);
